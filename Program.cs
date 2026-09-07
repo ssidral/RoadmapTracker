@@ -1,72 +1,85 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using RoadmapTracker.Data;
 using RoadmapTracker.Models;
 using RoadmapTracker.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddSingleton<JsonLogService>();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+// Determine database path from DATA_DIR environment variable
+var dataDir = Environment.GetEnvironmentVariable("DATA_DIR") 
+              ?? Path.Combine(Directory.GetCurrentDirectory(), "data");
+Directory.CreateDirectory(dataDir);
+var dbPath = Path.Combine(dataDir, "roadmap.db");
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlite($"Data Source={dbPath}"));
+
+builder.Services.AddScoped<SqliteLogService>();
 
 var app = builder.Build();
+
+// Ensure SQLite database and seed data are created on startup
+using (var scope = app.Services.CreateScope())
+{
+    var service = scope.ServiceProvider.GetRequiredService<SqliteLogService>();
+    await service.InitializeAsync();
+}
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
 var api = app.MapGroup("/api");
 
-// Full Database
-api.MapGet("/database", async (JsonLogService s) => Results.Ok(await s.GetFullDatabaseAsync()));
+// 1. Full Database fetch
+api.MapGet("/database", async (SqliteLogService s) => 
+    Results.Ok(await s.GetFullDatabaseAsync()));
 
-// Profiles
-api.MapPost("/profiles", async (UserProfile p, JsonLogService s) =>
+// 2. Profile Management
+api.MapPost("/profiles", async (UserProfile p, SqliteLogService s) => 
     Results.Ok(await s.CreateProfileAsync(p.Username, p.RoleTitle)));
 
-api.MapPost("/profiles/{id}/activate", async (string id, JsonLogService s) =>
+api.MapDelete("/profiles/{profileId}", async (string profileId, SqliteLogService s) => 
+    await s.DeleteProfileAsync(profileId) ? Results.Ok() : Results.BadRequest("Cannot delete the only profile."));
+
+api.MapPost("/profiles/{profileId}/activate", async (string profileId, SqliteLogService s) =>
 {
-    await s.SetActiveProfileAsync(id);
-    return Results.NoContent();
+    await s.SetActiveProfileAsync(profileId);
+    return Results.Ok();
 });
 
-api.MapDelete("/profiles/{id}", async (string id, JsonLogService s) =>
-    await s.DeleteProfileAsync(id) ? Results.NoContent() : Results.BadRequest("Cannot delete the only profile."));
-
-// Targets (under a Profile)
-api.MapPost("/profiles/{profileId}/targets", async (string profileId, LearningTarget t, JsonLogService s) =>
+// 3. Learning Targets
+api.MapPost("/profiles/{profileId}/targets", async (string profileId, LearningTarget t, SqliteLogService s) => 
     Results.Ok(await s.CreateTargetAsync(profileId, t)));
 
-api.MapDelete("/profiles/{profileId}/targets/{targetId}", async (string profileId, string targetId, JsonLogService s) =>
-    await s.DeleteTargetAsync(profileId, targetId) ? Results.NoContent() : Results.NotFound());
+api.MapDelete("/profiles/{profileId}/targets/{targetId}", async (string profileId, string targetId, SqliteLogService s) => 
+    await s.DeleteTargetAsync(profileId, targetId) ? Results.Ok() : Results.NotFound());
 
-// Logs (under a Profile and Target)
-api.MapPost("/profiles/{profileId}/targets/{targetId}/logs", async (string profileId, string targetId, DailyLog log, JsonLogService s) =>
+// 4. Daily Logs
+api.MapPost("/profiles/{profileId}/targets/{targetId}/logs", async (string profileId, string targetId, DailyLog log, SqliteLogService s) =>
 {
-    await s.UpsertLogAsync(profileId, targetId, log);
-    return Results.Ok(log);
+    await s.UpsertLogAsync(targetId, log);
+    return Results.Ok();
 });
 
-// Export full database as a downloadable file
-api.MapGet("/backup/export", async (JsonLogService s) =>
+api.MapDelete("/profiles/{profileId}/targets/{targetId}/logs/{dayNumber:int}", async (string profileId, string targetId, int dayNumber, SqliteLogService s) => 
+    await s.DeleteLogAsync(targetId, dayNumber) ? Results.Ok() : Results.NotFound());
+
+// 5. Backup & Restore (Compatible with JSON files)
+api.MapGet("/backup/export", async (SqliteLogService s) =>
 {
-    var db = await s.GetFullDatabaseAsync();
-    var jsonBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(db, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+    var fullDb = await s.GetFullDatabaseAsync();
+    var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(fullDb, new JsonSerializerOptions { WriteIndented = true });
     var fileName = $"roadmap-backup-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json";
     return Results.File(jsonBytes, "application/json", fileName);
 });
 
-// Restore full database from uploaded payload
-api.MapPost("/backup/restore", async (AppDatabase restoredDb, JsonLogService s) =>
+api.MapPost("/backup/restore", async (AppDatabase restoredDb, SqliteLogService s) =>
 {
     var success = await s.RestoreDatabaseAsync(restoredDb);
-    return success ? Results.Ok(new { message = "Database restored successfully." }) : Results.BadRequest("Invalid backup format.");
+    return success 
+        ? Results.Ok(new { message = "Database restored successfully." }) 
+        : Results.BadRequest("Invalid backup format.");
 });
-
-api.MapDelete("/profiles/{profileId}/targets/{targetId}/logs/{dayNumber:int}", async (string profileId, string targetId, int dayNumber, JsonLogService s) =>
-    await s.DeleteLogAsync(profileId, targetId, dayNumber) ? Results.NoContent() : Results.NotFound());
 
 app.Run();

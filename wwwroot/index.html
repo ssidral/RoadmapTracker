@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roadmap & Target Tracker</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/css/style.css">
+  
+  <!-- External Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+
+  <div class="wrapper">
+    <!-- Top Header: Profile + Action Controls -->
+    <header class="top-nav">
+      <div class="user-cluster">
+        <div class="avatar-badge" id="avatarText">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+        </div>
+        <div class="user-details">
+          <div class="user-selector-row">
+            <select id="profileSelect" class="user-dropdown" onchange="switchProfile(this.value)"></select>
+            <button class="btn-ui btn-glass" onclick="promptNewProfile()">+ Add User</button>
+            <button class="btn-ui btn-danger-ghost" onclick="deleteCurrentProfile()">Delete User</button>
+          </div>
+          <span class="user-subtext" id="displayRole">Platform & .NET Transition</span>
+        </div>
+      </div>
+
+      <!-- Action Controls & Theme Selector -->
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <select id="themeSelect" class="theme-dropdown" onchange="setAppTheme(this.value)">
+          <option value="dark">🌙 Midnight Dark</option>
+          <option value="light">☀️ Clean Light</option>
+          <option value="cyberpunk">⚡ Cyberpunk Neon</option>
+          <option value="tokyo">🌸 Tokyo Night</option>
+        </select>
+        <button class="btn-ui btn-glass" onclick="downloadBackup()" title="Download JSON Backup">💾 Backup JSON</button>
+        <button class="btn-ui btn-glass" onclick="document.getElementById('restoreFileInput').click()" title="Restore from Backup">📂 Restore</button>
+        <input type="file" id="restoreFileInput" accept=".json" style="display: none;" onchange="handleRestoreFile(event)">
+        <button class="btn-ui btn-glass" style="border-color: var(--accent); color: var(--accent);" onclick="exportTargetPDF()" title="Export PDF Report">📄 Export PDF</button>
+        <button class="btn-ui btn-primary" onclick="promptNewTarget()">+ New Target</button>
+      </div>
+    </header>
+
+    <!-- Sub-Navbar: Targets Under Active Profile -->
+    <div class="target-nav-bar">
+      <div class="target-tabs" id="targetTabs"></div>
+      <button class="btn-ui btn-danger-ghost" id="deleteTargetBtn" onclick="deleteCurrentTarget()">🗑 Delete Target</button>
+    </div>
+
+    <!-- KPI Strip & Interactive Charts -->
+    <div class="top-overview">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-lbl">Days Completed</div>
+          <div class="stat-val" id="stat-completed">0 / 0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-lbl">Target Progress</div>
+          <div class="stat-val" id="stat-progress">0%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-lbl">Study Time</div>
+          <div class="stat-val" id="stat-hours">0h</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-lbl">Git Pushes</div>
+          <div class="stat-val" id="stat-commits">0</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-title">Progress vs Remaining</div>
+        <div style="position: relative; height: 100px; width: 100px;">
+          <canvas id="progressChart"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-title">Recent Study Minutes</div>
+        <div style="position: relative; height: 100px; width: 100%;">
+          <canvas id="velocityChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Workspace Grid -->
+    <div class="main-grid">
+      <!-- Input Sidebar -->
+      <div class="panel">
+        <h2 id="form-title">Log Today's Session</h2>
+        <form id="logForm">
+          <div class="form-group">
+            <label for="dayNumber">Day Number</label>
+            <input type="number" id="dayNumber" min="1" required>
+          </div>
+          <div class="form-group">
+            <label for="date">Date</label>
+            <input type="date" id="date" required>
+          </div>
+          <div class="form-group">
+            <label for="topic">Topic / Lab Objective</label>
+            <input type="text" id="topic" placeholder="e.g. C# Pattern Matching" required>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <div class="form-group" style="flex: 1;">
+              <label for="theoryMinutes">Theory (m)</label>
+              <input type="number" id="theoryMinutes" value="30">
+            </div>
+            <div class="form-group" style="flex: 1;">
+              <label for="labMinutes">Lab (m)</label>
+              <input type="number" id="labMinutes" value="60">
+            </div>
+          </div>
+          <div class="form-group checkbox-group">
+            <input type="checkbox" id="gitPushed" checked>
+            <label for="gitPushed" style="margin: 0; cursor: pointer;">Pushed to GitHub</label>
+          </div>
+          <div class="form-group">
+            <label for="notes">Notes / Commands / Code</label>
+            <textarea id="notes" placeholder="Notes, insights, or commands..."></textarea>
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 10px;">
+            <button type="submit" class="btn-ui btn-primary" style="flex: 1; justify-content: center;" id="submitBtn">Save Session</button>
+            <button type="button" class="btn-ui btn-glass" onclick="resetForm()">Reset</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Log Table View -->
+      <div class="panel">
+        <h2 id="tableHeading">Target Log</h2>
+        <div class="table-container">
+          <table class="log-table">
+            <thead>
+              <tr>
+                <th style="width: 55px;">Day</th>
+                <th style="width: 105px;">Date</th>
+                <th style="width: 24%;">Topic</th>
+                <th>Notes & Key Takeaways</th>
+                <th style="width: 75px;">Time</th>
+                <th style="width: 95px;">Status</th>
+                <th style="width: 100px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="logsTbody">
+              <tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 16px;">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Script -->
+  <script src="/js/app.js"></script>
+</body>
+</html>
